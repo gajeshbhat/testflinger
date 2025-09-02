@@ -701,6 +701,135 @@ def test_poll_serial(capsys, requests_mock):
     assert "serial output" in std.out
 
 
+def test_poll_queue_position_first_in_line(capsys, requests_mock, monkeypatch):
+    """Test that queue position shows 'next in line' when position is 0."""
+    job_id = str(uuid.uuid1())
+
+    # Mock job state as waiting
+    requests_mock.get(
+        URL + f"/v1/result/{job_id}", json={"job_state": "waiting"}
+    )
+    # Mock queue position as 0 (first in line)
+    requests_mock.get(URL + f"/v1/job/{job_id}/position", text="0")
+    # Mock output endpoint
+    requests_mock.get(URL + f"/v1/result/{job_id}/output", text="")
+
+    # Mock sleep to avoid actual waiting
+    monkeypatch.setattr("time.sleep", lambda x: None)
+
+    sys.argv = ["", "poll", job_id]
+    tfcli = testflinger_cli.TestflingerCli()
+
+    # Mock get_job_state to return waiting twice, then complete to exit loop
+    call_count = 0
+
+    def mock_get_job_state(job_id):
+        nonlocal call_count
+        call_count += 1
+        if call_count <= 2:
+            return "waiting"
+        return "complete"
+
+    monkeypatch.setattr(tfcli, "get_job_state", mock_get_job_state)
+
+    tfcli.do_poll(job_id)
+    std = capsys.readouterr()
+    assert "This job is waiting on a node to become available." in std.out
+    assert "Queue position: next in line" in std.out
+
+
+def test_poll_queue_position_with_jobs_ahead(
+    capsys, requests_mock, monkeypatch
+):
+    """Test that queue position shows correct position when jobs are ahead."""
+    job_id = str(uuid.uuid1())
+
+    # Mock job state as waiting
+    requests_mock.get(
+        URL + f"/v1/result/{job_id}", json={"job_state": "waiting"}
+    )
+    # Mock queue position as 2 (third in line, 2 jobs ahead)
+    requests_mock.get(URL + f"/v1/job/{job_id}/position", text="2")
+    # Mock output endpoint
+    requests_mock.get(URL + f"/v1/result/{job_id}/output", text="")
+
+    # Mock sleep to avoid actual waiting
+    monkeypatch.setattr("time.sleep", lambda x: None)
+
+    sys.argv = ["", "poll", job_id]
+    tfcli = testflinger_cli.TestflingerCli()
+
+    # Mock get_job_state to return waiting twice, then complete to exit loop
+    call_count = 0
+
+    def mock_get_job_state(job_id):
+        nonlocal call_count
+        call_count += 1
+        if call_count <= 2:
+            return "waiting"
+        return "complete"
+
+    monkeypatch.setattr(tfcli, "get_job_state", mock_get_job_state)
+
+    tfcli.do_poll(job_id)
+    std = capsys.readouterr()
+    assert "This job is waiting on a node to become available." in std.out
+    assert "Queue position: 3 (jobs ahead: 2)" in std.out
+
+
+def test_poll_queue_position_changes(capsys, requests_mock, monkeypatch):
+    """Test that queue position updates are shown when position changes."""
+    job_id = str(uuid.uuid1())
+
+    # Mock job state as waiting
+    requests_mock.get(
+        URL + f"/v1/result/{job_id}", json={"job_state": "waiting"}
+    )
+    # Mock output endpoint
+    requests_mock.get(URL + f"/v1/result/{job_id}/output", text="")
+
+    # Mock queue position to change from 2 to 1 to 0
+    position_responses = ["2", "1", "0"]
+    position_call_count = 0
+
+    def mock_position_response(request, context):
+        nonlocal position_call_count
+        response = position_responses[
+            min(position_call_count, len(position_responses) - 1)
+        ]
+        position_call_count += 1
+        return response
+
+    requests_mock.get(
+        URL + f"/v1/job/{job_id}/position", text=mock_position_response
+    )
+
+    # Mock sleep to avoid actual waiting
+    monkeypatch.setattr("time.sleep", lambda x: None)
+
+    sys.argv = ["", "poll", job_id]
+    tfcli = testflinger_cli.TestflingerCli()
+
+    # Mock get_job_state to return waiting multiple times, then complete
+    call_count = 0
+
+    def mock_get_job_state(job_id):
+        nonlocal call_count
+        call_count += 1
+        if call_count <= 4:  # Initial call + 3 loop iterations
+            return "waiting"
+        return "complete"
+
+    monkeypatch.setattr(tfcli, "get_job_state", mock_get_job_state)
+
+    tfcli.do_poll(job_id)
+    std = capsys.readouterr()
+    assert "This job is waiting on a node to become available." in std.out
+    assert "Queue position: 3 (jobs ahead: 2)" in std.out
+    assert "Queue position: 2 (jobs ahead: 1)" in std.out
+    assert "Queue position: next in line" in std.out
+
+
 def test_agent_status(capsys, requests_mock):
     """Validate that the status of the agent is retrieved."""
     fake_agent = "fake_agent"

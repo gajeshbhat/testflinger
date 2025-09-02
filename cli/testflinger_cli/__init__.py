@@ -1001,7 +1001,15 @@ class TestflingerCli:
                     queue_pos = self.client.get_job_position(job_id)
                     if int(queue_pos) != prev_queue_pos:
                         prev_queue_pos = int(queue_pos)
-                        print(f"Jobs ahead in queue: {queue_pos}")
+                        if int(queue_pos) == 0:
+                            print("Queue position: next in line")
+                        else:
+                            position = int(queue_pos) + 1
+                            message = (
+                                f"Queue position: {position} "
+                                f"(jobs ahead: {queue_pos})"
+                            )
+                            print(message)
                 time.sleep(10)
                 output = ""
                 output = self.get_latest_output(job_id)
